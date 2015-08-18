@@ -23,7 +23,7 @@ int main()
 	if (info.dwMajorVersion == 5)  // winXP
 	{
 		std::cout << "detected win xp..." << std::endl;
-		CopyFileA("th145.exe", "th145_xp.exe", TRUE);
+		CopyFileA("th145.exe", "th145_xp.exe", FALSE);
 
 		FILE* hFile = nullptr;
 		errno_t err = fopen_s(&hFile, pTargetName, "rb");
