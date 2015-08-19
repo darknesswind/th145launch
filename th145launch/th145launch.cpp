@@ -135,5 +135,8 @@ int main()
 
 	hWritePipe = nullptr;
 	hReadPipe = nullptr;
+#ifdef _DEBUG
+	system("pause");
+#endif
     return 0;
 }
