@@ -2,6 +2,7 @@
 //
 #include "hook.h"
 #include "eh.h"
+#include <iostream>
 #ifdef _DEBUG
 // #include "dbghelp.h"
 #endif
@@ -18,6 +19,29 @@ static BOOL s_bLog = FALSE;
 static LONG s_nTlsIndent = -1;
 static LONG s_nTlsThread = -1;
 static LONG s_nThreadCnt = 0;
+
+void ReleaseMapObj()
+{
+	if (s_mapObj)
+	{
+		UnmapViewOfFile(s_mapObj);
+		s_mapObj = nullptr;
+	}
+}
+
+void OutputMessage(LPCSTR str)
+{
+	static HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	if (hOut && str && str[0] != 0)
+	{
+		DWORD writen = 0;
+		if (!WriteFile(hOut, str, strlen(str) + 1, &writen, nullptr))
+		{
+// 			MessageBoxA(nullptr, "write handle failed", "hook", MB_OK);
+		}
+		//std::cout << str;
+	}
+}
 
 BOOL __stdcall Mine_CreateProcessA(LPCSTR lpApplicationName,
 	LPSTR lpCommandLine,
@@ -45,18 +69,23 @@ BOOL __stdcall Mine_CreateProcessA(LPCSTR lpApplicationName,
 		ZeroMemory(&procInfo, sizeof(procInfo));
 	}
 
+	STARTUPINFOA startupinfo = { 0 };
+	startupinfo.cb = sizeof(STARTUPINFOA);
+	startupinfo.dwFlags = STARTF_USESTDHANDLES;
+	startupinfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+
 	BOOL rv = 0;
 	__try {
-		OutputDebugStringA("CreateProcessA\n");
+		OutputMessage("CreateProcessA\n");
 		rv = DetourCreateProcessWithDllA(lpApplicationName,
 			lpCommandLine,
 			lpProcessAttributes,
 			lpThreadAttributes,
-			bInheritHandles,
+			TRUE,
 			dwCreationFlags,
 			lpEnvironment,
 			lpCurrentDirectory,
-			lpStartupInfo,
+			&startupinfo,
 			lpProcessInformation,
 			s_szDllPath,
 			Real_CreateProcessA);
@@ -85,7 +114,7 @@ BOOL __stdcall Mine_CreateProcessW(LPCWSTR lpApplicationName,
 
 	BOOL rv = 0;
 	__try {
-		OutputDebugStringA("CreateProcessW\n");
+		OutputMessage("CreateProcessW\n");
 		rv = DetourCreateProcessWithDllW(lpApplicationName,
 			lpCommandLine,
 			lpProcessAttributes,
@@ -115,10 +144,10 @@ BOOL __stdcall Mine_EnumProcessModules(
  		return Real_EnumProcessModules(hProcess, lphModule, cb, lpcbNeeded);
 
 	if (lpcbNeeded)
-		*lpcbNeeded = 0;
+		*lpcbNeeded = sizeof(HMODULE);
 	if (lphModule)
-		*lphModule = 0;
-	OutputDebugStringA("EnumProcessModules\n");
+		*lphModule = GetModuleHandleA("user32");
+	OutputMessage("EnumProcessModules\n");
 
 	return TRUE;
 }
@@ -134,13 +163,14 @@ BOOL __stdcall Mine_WaitForDebugEvent(
 		switch (lpDebugEvent->dwDebugEventCode)
 		{
 		case EXCEPTION_DEBUG_EVENT:
-			OutputDebugStringA("EXCEPTION_DEBUG_EVENT\n");
+			OutputMessage("EXCEPTION_DEBUG_EVENT\n");
 			++exceptCount;
 			if (exceptCount > 100)
 				lpDebugEvent->dwDebugEventCode = 0;
 			break;
 		case EXIT_PROCESS_DEBUG_EVENT:
-			OutputDebugStringA("EXIT_PROCESS_DEBUG_EVENT\n");
+			ReleaseMapObj();
+			OutputMessage("#EXIT_PROCESS_DEBUG_EVENT\n");
 			s_exitProcess = true;
 			s_mapObj = nullptr;
 			break;
@@ -153,13 +183,16 @@ BOOL __stdcall Mine_TerminateProcess(
 	_In_ HANDLE hProcess,
 	_In_ UINT uExitCode)
 {
-#ifdef _DEBUG
+	ReleaseMapObj();
+
 	static char buf[256] = { 0 };
 	sprintf_s(buf, "terminateProcess %d @%d",
 		GetProcessId(hProcess),
 		GetProcessId(GetCurrentProcess()));
+#ifdef _DEBUG
 	MessageBoxA(nullptr, buf, "hook", MB_OK);
 #endif
+	OutputMessage(buf);
 	return Real_TerminateProcess(hProcess, uExitCode);
 }
 
@@ -207,6 +240,7 @@ HANDLE __stdcall Mine_CreateFileMappingA(
 	_In_ DWORD dwMaximumSizeLow,
 	_In_opt_ LPCSTR lpName)
 {
+	OutputMessage("CreateFileMappingA\n");
 	return Real_CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
 }
 
@@ -225,6 +259,7 @@ LPVOID __stdcall Mine_MapViewOfFile(
 		dwFileOffsetLow,
 		dwNumberOfBytesToMap);
 
+	OutputMessage("MapViewOfFile\n");
 	if (!s_mapObj)
 	{
 		s_mapObj = (FileMapObject*)pResult;
@@ -256,6 +291,7 @@ HWND __stdcall Mine_CreateWindowExA(
 	_In_opt_ HINSTANCE hInstance,
 	_In_opt_ LPVOID lpParam)
 {
+	OutputMessage("CreateWindowExA\n");
 	HWND hWnd = Real_CreateWindowExA(dwExStyle, lpClassName,
 		lpWindowName, dwStyle,
 		X, Y, nWidth, nHeight,
@@ -304,6 +340,18 @@ BOOL __stdcall Mine_PostMessageA(_In_opt_ HWND hWnd, _In_ UINT Msg, _In_ WPARAM 
 	return Real_PostMessageA(hWnd, Msg, wParam, lParam);
 }
 
+DWORD __stdcall Mine_WaitForMultipleObjectsEx(
+	_In_ DWORD nCount,
+	_In_reads_(nCount) CONST HANDLE * lpHandles,
+	_In_ BOOL bWaitAll,
+	_In_ DWORD dwMilliseconds,
+	_In_ BOOL bAlertable)
+{
+	DWORD res = Real_WaitForMultipleObjectsEx(nCount, lpHandles, bWaitAll, dwMilliseconds, bAlertable);
+
+	return res;
+}
+
 VOID DetAttach(PVOID *ppvReal, PVOID pvMine, PCHAR psz)
 {
 	PVOID pvReal = NULL;
@@ -313,11 +361,11 @@ VOID DetAttach(PVOID *ppvReal, PVOID pvMine, PCHAR psz)
 
 	static char buf[256] = { 0 };
 	sprintf_s(buf, "Attach %s...\n", psz);
-	OutputDebugStringA(buf);
+	OutputMessage(buf);
 
 	LONG l = DetourAttach(ppvReal, pvMine);
 	if (l != 0) {
-		OutputDebugStringA("Attach failed\n");
+		OutputMessage("Attach failed\n");
 
 		// 		Decode((PBYTE)*ppvReal, 3);
 	}
@@ -376,6 +424,7 @@ LONG AttachDetours(VOID)
 #if SINGLE_PROCESS
 // 	ATTACH(IsWindow);
 // 	ATTACH(CreateWindowExA);
+	ATTACH(WaitForMultipleObjectsEx);
 #endif
 
 	PVOID *ppbFailedPointer = NULL;
@@ -414,6 +463,7 @@ LONG DetachDetours(VOID)
 #if SINGLE_PROCESS
 // 	DETACH(IsWindow);
 // 	DETACH(CreateWindowExA);
+	DETACH(WaitForMultipleObjectsEx);
 #endif
 
 	if (DetourTransactionCommit() != 0) {
@@ -578,7 +628,7 @@ BOOL ProcessAttach(HMODULE hDll)
 
 	LONG error = AttachDetours();
 	if (error != NO_ERROR) {
-		OutputDebugStringA("### Error attaching detours\n");
+		OutputMessage("### Error attaching detours\n");
 	}
 
 	s_bLog = TRUE;
@@ -592,7 +642,7 @@ BOOL ProcessDetach(HMODULE hDll)
 
 	LONG error = DetachDetours();
 	if (error != NO_ERROR) {
-		OutputDebugStringA("### Error detaching detours\n");
+		OutputMessage("### Error detaching detours\n");
 	}
 
 	// 	Syelog(SYELOG_SEVERITY_NOTICE, "### Closing.\n");
@@ -653,18 +703,20 @@ BOOL APIENTRY DllMain(HINSTANCE hModule, DWORD dwReason, PVOID lpReserved)
 
 	switch (dwReason) {
 	case DLL_PROCESS_ATTACH:
-		OutputDebugStringA("DllMain DLL_PROCESS_ATTACH\n");
+		OutputMessage("DllMain DLL_PROCESS_ATTACH\n");
 		DetourRestoreAfterWith();
 		return ProcessAttach(hModule);
 	case DLL_PROCESS_DETACH:
-		OutputDebugStringA("DllMain DLL_PROCESS_DETACH\n");
+		MessageBoxA(nullptr, GetCommandLineA(), "hook", 0);
+		OutputMessage("#DllMain DLL_PROCESS_DETACH\n");
+		ReleaseMapObj();
 		ret = ProcessDetach(hModule);
 		return ret;
 	case DLL_THREAD_ATTACH:
-		OutputDebugStringA("DllMain DLL_THREAD_ATTACH\n");
+// 		OutputMessage("DllMain DLL_THREAD_ATTACH\n");
 		return ThreadAttach(hModule);
 	case DLL_THREAD_DETACH:
-		OutputDebugStringA("DllMain DLL_THREAD_DETACH\n");
+// 		OutputMessage("DllMain DLL_THREAD_DETACH\n");
 		return ThreadDetach(hModule);
 	}
 	return TRUE;

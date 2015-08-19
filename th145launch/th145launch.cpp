@@ -11,11 +11,12 @@
 #include <detours.h>
 #include <cassert>
 #include <iostream>
+#include <thread>
 
 int main()
 {
 #ifdef _DEBUG
-	SetCurrentDirectoryW(LR"(C:\Game\東方\th145\)");
+	SetCurrentDirectoryW(LR"(C:\Users\UUZ\Desktop\th145东方深秘录（日文版）\th145)");
 #endif
 	LPCSTR pTargetName = R"(th145.exe)";
 	OSVERSIONINFOA info = { sizeof(OSVERSIONINFOA) };
@@ -53,6 +54,14 @@ int main()
 		}
 	}
 
+	HANDLE hReadPipe = nullptr;
+	HANDLE hWritePipe = nullptr;
+	SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+	if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+	{
+		std::cout << "create pipe failed!" << std::endl;
+	}
+
 	char szDllPath[300];
 	char sDirver[MAX_PATH];
 	char sPath[MAX_PATH];
@@ -65,6 +74,9 @@ int main()
 	PROCESS_INFORMATION procInfo = { 0 };
 	STARTUPINFOA startupinfo = { 0 };
 	startupinfo.cb = sizeof(STARTUPINFOA);
+	startupinfo.dwFlags = STARTF_USESTDHANDLES;
+// 	startupinfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	startupinfo.hStdOutput = hWritePipe;
 	char path[256];
 	strcpy_s(path, pTargetName);
 	BOOL res = DetourCreateProcessWithDllExA(
@@ -72,7 +84,7 @@ int main()
 		path,
 		nullptr,
 		nullptr,
-		FALSE,
+		TRUE,
 		CREATE_DEFAULT_ERROR_MODE | CREATE_SUSPENDED,
 		nullptr,
 		nullptr,
@@ -87,13 +99,41 @@ int main()
 		std::cout << "create process succeed!" << std::endl;
 		ResumeThread(procInfo.hThread);
 		std::cout << "waiting process exit..." << std::endl;
+
+		std::thread worker([&]()
+		{
+			char buff[1024] = { 0 };
+			while (true)
+			{
+				DWORD dwReaded = 0;
+				if (!ReadFile(hReadPipe, buff, sizeof(buff), &dwReaded, NULL))
+					break;
+				std::cout << buff;
+
+				if (buff[0] == '#')
+					break;
+			}
+		});
+		worker.detach();
+
 		WaitForSingleObject(procInfo.hProcess, INFINITE);
+		CloseHandle(procInfo.hProcess);
+		CloseHandle(procInfo.hThread);
+
 		std::cout << "process exited." << std::endl;
 	}
 	else
 	{
 		std::cout << "create process failed!" << std::endl;
+		system("pause");
 	}
-	system("pause");
+
+	if (hWritePipe)
+		CloseHandle(hWritePipe);
+	if (hReadPipe)
+		CloseHandle(hReadPipe);
+
+	hWritePipe = nullptr;
+	hReadPipe = nullptr;
     return 0;
 }

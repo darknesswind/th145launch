@@ -117,3 +117,11 @@ HWND(__stdcall* Real_CreateWindowExA)(
 	_In_opt_ HINSTANCE hInstance,
 	_In_opt_ LPVOID lpParam)
 	= CreateWindowExA;
+
+DWORD (__stdcall* Real_WaitForMultipleObjectsEx)(
+	_In_ DWORD nCount,
+	_In_reads_(nCount) CONST HANDLE * lpHandles,
+	_In_ BOOL bWaitAll,
+	_In_ DWORD dwMilliseconds,
+	_In_ BOOL bAlertable)
+= WaitForMultipleObjectsEx;
