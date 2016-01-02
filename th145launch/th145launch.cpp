@@ -13,18 +13,29 @@
 #include <iostream>
 #include <thread>
 
-int main()
+const int buffSize = 0x100;
+
+void ProcessWinXP(char *pTargetName)
 {
-#ifdef _DEBUG
-	SetCurrentDirectoryW(LR"(C:\Users\UUZ\Desktop\th145东方深秘录（日文版）\th145)");
-#endif
-	LPCSTR pTargetName = R"(th145.exe)";
 	OSVERSIONINFOA info = { sizeof(OSVERSIONINFOA) };
 	GetVersionExA(&info);
 	if (info.dwMajorVersion == 5)  // winXP
 	{
+		char xpName[buffSize] = { 0 };
+		memcpy(xpName, pTargetName, buffSize);
+		int len = strlen(xpName);
+		int insertPos = len - 1;
+		for (; insertPos >= 0; --insertPos)
+		{
+			if (xpName[insertPos] == '.')
+				break;
+		}
+		if (insertPos < 0)
+			insertPos = len;
+		memcpy(xpName + insertPos, "_xp.exe\0", 8);
+
 		std::cout << "detected win xp..." << std::endl;
-		CopyFileA("th145.exe", "th145_xp.exe", FALSE);
+		CopyFileA(pTargetName, xpName, FALSE);
 
 		FILE* hFile = nullptr;
 		errno_t err = fopen_s(&hFile, pTargetName, "rb");
@@ -37,22 +48,35 @@ int main()
 
 			buf[0x180] = 5;
 			buf[0x188] = 5;
-			err = fopen_s(&hFile, "th145_xp.exe", "r+b");
+			err = fopen_s(&hFile, xpName, "r+b");
 			if (0 == err)
 			{
 				fseek(hFile, 0, SEEK_SET);
 				fwrite(&buf, sizeof(buf), 1, hFile);
 				fclose(hFile);
-				pTargetName = R"(th145_xp.exe)";
+				memcpy(pTargetName, xpName, buffSize);
 			}
 			else
-				std::cout << "open th145_xp.exe failed!" << std::endl;
+				std::cout << "open " << xpName << " failed!" << std::endl;
 		}
 		else
 		{
-			std::cout << "open th145.exe failed!" << std::endl;
+			std::cout << "open " << pTargetName << " failed!" << std::endl;
 		}
 	}
+}
+
+int main()
+{
+#ifdef _DEBUG
+// 	SetCurrentDirectoryW(LR"(D:\Game\Touhou\上海アリス幻樂団\[TH145]东方深秘录\)");
+	SetCurrentDirectoryW(LR"(D:\Game\Touhou\黄昏边境\収集荷取 金\)");
+#endif
+	char targetName[buffSize] = { 0 };
+	::GetPrivateProfileStringA("default", "appName", "th145.exe", targetName, buffSize, ".\\thlaunch.ini");
+	if (0 == targetName[0])
+		targetName[0] = 'x';
+	ProcessWinXP(targetName);
 
 	HANDLE hReadPipe = nullptr;
 	HANDLE hWritePipe = nullptr;
@@ -78,7 +102,7 @@ int main()
 // 	startupinfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	startupinfo.hStdOutput = hWritePipe;
 	char path[256];
-	strcpy_s(path, pTargetName);
+	strcpy_s(path, targetName);
 	BOOL res = DetourCreateProcessWithDllExA(
 		nullptr,
 		path,

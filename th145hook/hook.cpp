@@ -707,7 +707,9 @@ BOOL APIENTRY DllMain(HINSTANCE hModule, DWORD dwReason, PVOID lpReserved)
 		DetourRestoreAfterWith();
 		return ProcessAttach(hModule);
 	case DLL_PROCESS_DETACH:
+#ifdef _DEBUG
 		MessageBoxA(nullptr, GetCommandLineA(), "hook", 0);
+#endif
 		OutputMessage("#DllMain DLL_PROCESS_DETACH\n");
 		ReleaseMapObj();
 		ret = ProcessDetach(hModule);
